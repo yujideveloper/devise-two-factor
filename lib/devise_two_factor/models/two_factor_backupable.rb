@@ -6,6 +6,15 @@ module Devise
     module TwoFactorBackupable
       extend ActiveSupport::Concern
 
+      included do
+        otp_backup_codes_store_association_name = otp_backup_codes_store_name || "self"
+        class_eval <<-METHODS, __FILE__, __LINE__ + 1
+          def otp_backup_codes_store
+            #{otp_backup_codes_store_association_name}
+          end
+        METHODS
+      end
+
       def self.required_fields(klass)
         [:otp_backup_codes]
       end
@@ -24,7 +33,7 @@ module Devise
         end
 
         hashed_codes = codes.map { |code| Devise::Encryptor.digest(self.class, code) }
-        self.otp_backup_codes = hashed_codes
+        otp_backup_codes_store.otp_backup_codes = hashed_codes
 
         codes
       end
@@ -32,13 +41,13 @@ module Devise
       # Returns true and invalidates the given code
       # if that code is a valid backup code.
       def invalidate_otp_backup_code!(code)
-        codes = self.otp_backup_codes || []
+        codes = otp_backup_codes_store.otp_backup_codes || []
 
         codes.each do |backup_code|
           next unless Devise::Encryptor.compare(self.class, backup_code, code)
 
           codes.delete(backup_code)
-          self.otp_backup_codes = codes
+          otp_backup_codes_store.otp_backup_codes = codes
           save!(validate: false)
           return true
         end
@@ -51,6 +60,7 @@ module Devise
       module ClassMethods
         Devise::Models.config(self, :otp_backup_code_length,
                                     :otp_number_of_backup_codes,
+                                    :otp_backup_codes_store_name,
                                     :pepper)
       end
     end

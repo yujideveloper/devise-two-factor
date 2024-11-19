@@ -7,14 +7,21 @@ module Devise
       include Devise::Models::DatabaseAuthenticatable
 
       included do
-        encrypts :otp_secret, **splattable_encrypted_attr_options
-        attr_accessor :otp_attempt
+        otp_store_model.encrypts :otp_secret, **splattable_encrypted_attr_options
+        otp_store_model.attr_accessor :otp_attempt
+
+        otp_store_association_name = otp_store_name || "self"
+        class_eval <<-METHODS, __FILE__, __LINE__ + 1
+          def otp_store
+            #{otp_store_association_name}
+          end
+        METHODS
       end
 
       def otp_secret
         # return the OTP secret stored as a Rails encrypted attribute if it
         # exists. Otherwise return OTP secret stored by the `attr_encrypted` gem
-        return self[:otp_secret] if self[:otp_secret]
+        return otp_store[:otp_secret] if otp_store[:otp_secret]
 
         legacy_otp_secret
       end
@@ -28,20 +35,21 @@ module Devise
       end
 
       def self.required_fields(klass)
+        # FIXME: required fields are not defined in included model, it are defined in store model
         [:otp_secret, :consumed_timestep]
       end
 
       # This defaults to the model's otp_secret
       # If this hasn't been generated yet, pass a secret as an option
       def validate_and_consume_otp!(code, options = {})
-        otp_secret = options[:otp_secret] || self.otp_secret
+        otp_secret = options[:otp_secret] || otp_store.otp_secret
         return false unless code.present? && otp_secret.present?
 
         totp = otp(otp_secret)
 
-        if self.consumed_timestep
+        if otp_store.consumed_timestep
           # reconstruct the timestamp of the last consumed timestep
-          after_timestamp = self.consumed_timestep * otp.interval
+          after_timestamp = otp_store.consumed_timestep * otp.interval
         end
 
         if totp.verify(code.gsub(/\s+/, ""), drift_behind: self.class.otp_allowed_drift, drift_ahead: self.class.otp_allowed_drift, after: after_timestamp)
@@ -51,7 +59,7 @@ module Devise
         false
       end
 
-      def otp(otp_secret = self.otp_secret)
+      def otp(otp_secret = otp_store.otp_secret)
         ROTP::TOTP.new(otp_secret)
       end
 
@@ -65,13 +73,13 @@ module Devise
       end
 
       def otp_provisioning_uri(account, options = {})
-        otp_secret = options[:otp_secret] || self.otp_secret
+        otp_secret = options[:otp_secret] || otp_store.otp_secret
         ROTP::TOTP.new(otp_secret, options).provisioning_uri(account)
       end
 
       def clean_up_passwords
         super
-        self.otp_attempt = nil
+        otp_store.otp_attempt = nil if otp_store
       end
 
     protected
@@ -79,8 +87,8 @@ module Devise
       # An OTP cannot be used more than once in a given timestep
       # Storing timestep of last valid OTP is sufficient to satisfy this requirement
       def consume_otp!
-        if self.consumed_timestep != current_otp_timestep
-          self.consumed_timestep = current_otp_timestep
+        if otp_store.consumed_timestep != current_otp_timestep
+          otp_store.consumed_timestep = current_otp_timestep
           save!(validate: false)
           return true
         end
@@ -92,7 +100,8 @@ module Devise
         Devise::Models.config(self, :otp_secret_length,
                                     :otp_allowed_drift,
                                     :otp_encrypted_attribute_options,
-                                    :otp_secret_encryption_key)
+                                    :otp_secret_encryption_key,
+                                    :otp_store_name)
 
         # Geneartes an OTP secret of the specified length, returning it after Base32 encoding.
         def generate_otp_secret(otp_secret_length = self.otp_secret_length)
@@ -106,6 +115,14 @@ module Devise
           return {} if otp_encrypted_attribute_options.nil?
 
           otp_encrypted_attribute_options
+        end
+
+        def otp_store_model
+          if otp_store_name
+            otp_store_name.classify.constantize
+          else
+            self
+          end
         end
       end
     end

@@ -21,6 +21,9 @@ module Devise
   mattr_accessor :otp_encrypted_attribute_options
   @@otp_encrypted_attribute_options = {}
 
+  mattr_accessor :otp_store_name
+  @@otp_store_name = nil
+
   # The length of randomly generated OTP backup codes (in bytes).
   # The codes will be hex-encoded and have a length twice the configured value.
   mattr_accessor :otp_backup_code_length
@@ -30,6 +33,9 @@ module Devise
   # generate_otp_backup_codes!
   mattr_accessor :otp_number_of_backup_codes
   @@otp_number_of_backup_codes = 5
+
+  mattr_accessor :otp_backup_codes_store_name
+  @@otp_backup_codes_store_name = nil
 end
 
 Devise.add_module(:two_factor_authenticatable, :route => :session, :strategy => true,
